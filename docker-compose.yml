@@ -1,0 +1,46 @@
+# `docker compose up -d db` gives a database for development and tests.
+# `docker compose --profile app up -d --build` also builds and runs the app with demo data on :8095.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ujian
+      POSTGRES_PASSWORD: ujian
+      POSTGRES_DB: ujian
+    ports: ["5590:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ujian"]
+      interval: 2s
+      retries: 20
+
+  app:
+    profiles: [app]
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      APP_URL: http://localhost:8095
+      SANCTUM_STATEFUL_DOMAINS: localhost:8095
+      SEED_DEMO: "true"
+    volumes: [storage:/app/storage/app]
+    ports: ["8095:8080"]
+
+  # Submits attempts whose time ran out, every minute, even if the student closed the browser.
+  scheduler:
+    profiles: [app]
+    build: .
+    depends_on: [app]
+    command: ["php", "artisan", "schedule:work"]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      RUN_MIGRATIONS: "false"
+
+volumes:
+  pgdata:
+  storage:

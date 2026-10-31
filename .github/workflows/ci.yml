@@ -1,0 +1,49 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: ujian, POSTGRES_PASSWORD: ujian, POSTGRES_DB: ujian_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U ujian" --health-interval 2s --health-retries 20
+    defaults: { run: { working-directory: backend } }
+    env: { DB_HOST: 127.0.0.1, DB_PORT: 5432 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.4", extensions: "pdo_pgsql, zip, intl", coverage: none }
+      - run: composer install --no-interaction --prefer-dist
+      - run: cp .env.example .env && php artisan key:generate
+      - run: ./vendor/bin/pest
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: ujian, POSTGRES_PASSWORD: ujian, POSTGRES_DB: ujian_e2e }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U ujian" --health-interval 2s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: "8.4", extensions: "pdo_pgsql, zip, intl", coverage: none }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: composer install --no-interaction --prefer-dist && cp .env.example .env && php artisan key:generate && php artisan storage:link
+        working-directory: backend
+      - run: npm ci && npx tsc -b && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+        env: { E2E_DB_HOST: 127.0.0.1, E2E_DB_PORT: 5432 }
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ruang-ujian .
